@@ -5,12 +5,12 @@ This application requires Python along with the **pygame** extension. The extens
 
 > Linux/MacOS
 ```
-pip install customtkinter
+pip install pygame
 ```
 
 > Windows
 ```
-pip3 install customtkinter
+pip3 install pygame
 ```
 
 To run the program, clone this repository or download the files. In a directory with all of the *.py files, run:
