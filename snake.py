@@ -4,14 +4,18 @@ if find_spec( checkPackageInstalled ) is None:
    print( f'Python extension {checkPackageInstalled} must be installed to run this program. Install it with:\npip install {checkPackageInstalled}' )
    exit( )
 import pygame
+import time
 from math import floor
-import random
+from random import randint
+from sys import stdin
+from FileManager import FileManager
 
-CLOCK_RATE = 15
+CLOCK_RATE = 60
 
 # SETTINGS
 CYCLIC_BORDER = False
 STARTING_LENGTH = 1
+SNAKE_MOVE_TIME = 4
 
 # Dimensions
 SCREEN_WIDTH = 500
@@ -40,8 +44,11 @@ CYAN = ( 0, 255, 255 )
 YELLOW = ( 255, 255, 0 )
 PURPLE = ( 255, 0, 255 )
 BACKGROUND_COLOR = CYAN
-SNAKE_COLOR = RED
-APPLE_COLOR = YELLOW
+APPLE_COLOR = '#F72D13'
+BORDER_COLOR = WHITE
+TEXT_COLOR = WHITE
+COLOR_CHANGE_PER_BLOCK = 5
+GRADIENT_RANGE = 80
 
 # Directions
 UP = ( 0, -1 )
@@ -56,11 +63,13 @@ GAME_OVER = 1
 MENU = 2
 
 # Global variables
+fileManager = None
 blockList = [ ]
 coloredBlocks = [ ( floor( GRID_SIZE/2 ), floor( GRID_SIZE/2 ) ) ]
 snakeLength = 3
 apple = ( 5, 5 )
 programState = GAME
+direction = STARTING_DIRECTION
 
 class Button:
    def __init__( self, screen, text, width, height, pos ):
@@ -123,7 +132,7 @@ def moveSnake( gameSurface, direction ):
    global snakeLength
    global coloredBlocks
    if len( coloredBlocks ) == 0:
-      return
+      return -1
    
    # Add a block in the direction of motion
    nextBlock = addTuples( coloredBlocks[ -1 ], direction )
@@ -135,9 +144,9 @@ def moveSnake( gameSurface, direction ):
 
    if nextBlock == apple:
       # Snake found the apple, re-randomize and add 1 to length
-      randomBlock = ( random.randint( 0, GRID_SIZE-1 ), random.randint( 0, GRID_SIZE-1 ) )
+      randomBlock = ( randint( 0, GRID_SIZE-1 ), randint( 0, GRID_SIZE-1 ) )
       while randomBlock in coloredBlocks or randomBlock == apple:
-         randomBlock = ( random.randint( 0, GRID_SIZE-1 ), random.randint( 0, GRID_SIZE-1 ) )
+         randomBlock = ( randint( 0, GRID_SIZE-1 ), randint( 0, GRID_SIZE-1 ) )
          
       snakeLength += 1
       apple = randomBlock
@@ -147,34 +156,56 @@ def moveSnake( gameSurface, direction ):
    # Erase the trailing blocks to maintain the length
    while len( coloredBlocks ) > snakeLength:
       del coloredBlocks[ 0 ]
-      
-   colorBlock( gameSurface, APPLE_COLOR, apple )
-   
-   global blockList
-   for blockPos in coloredBlocks:
-      colorBlock( gameSurface, SNAKE_COLOR, blockPos )
 
    return 0
 
-def displayScore( screen ):
-   global snakeLength
+def displayObjects( surface ):
+   colorBlock( surface, APPLE_COLOR, apple )
    
-   score = Text( screen, str( snakeLength ), 'freesansbold.ttf', 64, WHITE, BLACK, ( SCREEN_WIDTH/2, 60 ) )
-   score.draw( )
+   for blockIndex, blockPos in enumerate( coloredBlocks ):
+      # Define a gradient going from (0,255,0) -> (0,255-GRADIENT_RANGE,0) -> (0,255,0)
+      upperBound = 255
+      lowerBound = upperBound - GRADIENT_RANGE
+      colorDifference = blockIndex * COLOR_CHANGE_PER_BLOCK
 
+      if colorDifference % ( GRADIENT_RANGE*2 ) >= GRADIENT_RANGE:
+         # Adding would take you past 255, subtract
+         blockColor = ( 0, upperBound - ( colorDifference % GRADIENT_RANGE ), 0 )
+      else:
+         blockColor = ( 0, lowerBound + ( colorDifference % GRADIENT_RANGE ), 0 )
+
+      colorBlock( surface, blockColor, blockPos )
+
+def displayScores( screen, snakeLength, highScore ):
+   score = Text( screen, str( snakeLength ), 'freesansbold.ttf', 64, TEXT_COLOR, BLACK, ( SCREEN_WIDTH/2, 50 ) )
+   score.draw( )
+   
+   if len( highScore ) > 0:
+      text = f'High score: {highScore[ 0 ]} ({highScore[ 1 ]})'
+   else:
+      text = 'No high score'
+      
+   highScore = Text( screen, text, 'freesansbold.ttf', 16, TEXT_COLOR, BLACK, ( SCREEN_WIDTH/2, 100 ) )
+   highScore.draw( )
+   
 def gameOver( gameSurface ):
    global programState
+   global replayButton
+   global fileManager
+   global snakeLength
+   global startGameTime
+   
    programState = GAME_OVER
    
-   # font = pygame.font.Font( 'freesansbold.ttf', 32 )
-   # text = font.render( 'Game Over', True, WHITE, BLACK )
-   # textRec = text.get_rect( )
-   # textRec.center = ( FRAME_WIDTH/2, FRAME_HEIGHT/2 - 30 )
-   # gameSurface.blit( text, textRec )
-   
-   global replayButton
    replayButton = Button( gameSurface, 'Play Again', 170, 35, ( FRAME_WIDTH/2, FRAME_HEIGHT/2 ) )
    replayButton.draw( )
+   
+   fileManager.checkHighScore( snakeLength )
+
+   # Add this result to the scores file
+   elapsedTime = time.time( ) - startGameTime
+   currentTime = time.strftime( '%H:%M:%S', time.localtime( ) )
+   # fileManager.recordScore( snakeLength, elapsedTime, currentTime )
 
 def resetGame( ):
    global programState
@@ -182,15 +213,21 @@ def resetGame( ):
    global coloredBlocks
    global apple
    global direction
+   global startGameTime
    
    programState = GAME
    snakeLength = STARTING_LENGTH
    # Initialize snake
    coloredBlocks = [ ( 1, 1 ) ]
    direction = STARTING_DIRECTION
-   apple = ( random.randint( 3, GRID_SIZE-1 ), random.randint( 3, GRID_SIZE-1 ) )
+   apple = ( randint( 3, GRID_SIZE-1 ), randint( 3, GRID_SIZE-1 ) )
+   startGameTime = time.time( )
 
 def main( ):
+   global fileManager
+   fileManager = FileManager( 'Leaderboard.csv', 'ScoresMarch7.csv' )
+   leaderboard = fileManager.getLeaderboard( )
+   
    pygame.init( )
    
    screen = pygame.display.set_mode( [ SCREEN_WIDTH, SCREEN_HEIGHT ] )
@@ -210,28 +247,33 @@ def main( ):
    
    global replayButton
    global direction
+   prevDirection = direction
    numIterations = 0
+   lastMoveNumIterations = numIterations
    loop = True
    while loop:
-      prevDirection = direction
       for event in pygame.event.get( ):
          # Process events before updating screen
          if event.type == pygame.KEYDOWN:
-            if event.key == pygame.K_UP:
+            if event.key == pygame.K_UP or event.key == pygame.K_w:
                if prevDirection != DOWN:
                   direction = UP
                   
-            elif event.key == pygame.K_RIGHT:
+            elif event.key == pygame.K_RIGHT or event.key == pygame.K_d:
                if prevDirection != LEFT:
                   direction = RIGHT
 
-            elif event.key == pygame.K_DOWN:
+            elif event.key == pygame.K_DOWN or event.key == pygame.K_s:
                if prevDirection != UP:
                   direction = DOWN
 
-            elif event.key == pygame.K_LEFT:
+            elif event.key == pygame.K_LEFT or event.key == pygame.K_a:
                if prevDirection != RIGHT:
                   direction = LEFT
+               
+            elif programState == GAME_OVER and \
+                 ( event.key == pygame.K_RETURN or event.key == pygame.K_SPACE ):
+               resetGame( )
          
          elif event.type == pygame.MOUSEBUTTONDOWN:
             if programState == GAME_OVER and replayButton.checkClick( ):
@@ -245,20 +287,26 @@ def main( ):
          # Fill the screen
          screen.fill( BLACK )
          # Fill the background (border) with white
-         borderSurface.fill( WHITE )
+         borderSurface.fill( BORDER_COLOR )
          # Fill the inner surface
          gameSurface.fill( BACKGROUND_COLOR )
 
-         moveSnake( gameSurface, direction )
+         # Display the snake and apple on the screen
+         displayObjects( gameSurface )
 
-         displayScore( screen )
+         # Display the numbers at the top of the screen
+         leaderboard = fileManager.getLeaderboard( )
+         displayScores( screen, snakeLength, leaderboard[ 0 ] if len( leaderboard ) > 0 else [ ] )
+
+         # Check if enough time has passed to move the snake
+         if numIterations >= lastMoveNumIterations + SNAKE_MOVE_TIME:
+            moveSnake( gameSurface, direction )
+            lastMoveNumIterations = numIterations
+            prevDirection = direction
 
          # Display the changes made
          borderSurface.blit( gameSurface, ( BORDER_SIZE/2, BORDER_SIZE/2 ) )
          screen.blit( borderSurface, ( FRAME_OFFSET_X, FRAME_OFFSET_Y ) )
-      
-      elif programState == GAME_OVER:
-         loop = loop
 
       pygame.display.update( )
       clock.tick( CLOCK_RATE )
